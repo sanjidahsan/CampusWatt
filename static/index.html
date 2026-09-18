@@ -10,6 +10,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CampusWatt — Dispatch Console</title>
+<link rel="icon" href="static/favicon.svg?v=2" type="image/svg+xml">
+<link rel="icon" href="static/favicon.ico?v=2" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="static/favicon-32.png?v=2">
+<link rel="icon" type="image/png" sizes="16x16" href="static/favicon-16.png?v=2">
+<link rel="apple-touch-icon" sizes="180x180" href="static/apple-touch-icon.png?v=2">
+<link rel="manifest" href="static/site.webmanifest?v=2">
+<meta name="theme-color" content="#0b0e14">
+<meta name="description" content="CampusWatt — LLM-assisted 24-hour campus energy dispatch console.">
 <style>
   :root {
     --paper: #0b0e14;
@@ -2330,18 +2338,31 @@ async function run() {
   }
 }
 
-async function probeHealth() {
+// A free Render instance cold-starts in ~10-60s. A single boot-time probe is a
+// lie until that finishes, so retry with backoff and report what is happening.
+const HEALTH_RETRY_MS = 3000;
+const HEALTH_MAX_ATTEMPTS = 20;   // ~60s of retries
+
+async function probeHealth(attempt = 0) {
   const t0 = performance.now();
   try {
-    const r = await fetch("/health");
+    const r = await fetch("/health", { cache: "no-store" });
     const ok = r.ok && (await r.json()).status === "ok";
-    $("healthDot").className = "dot " + (ok ? "ok" : "bad");
-    $("healthTxt").textContent = ok
-      ? "api ok · " + Math.round(performance.now() - t0) + " ms"
-      : "api error · HTTP " + r.status;
+    if (ok) {
+      $("healthDot").className = "dot ok";
+      $("healthTxt").textContent = "api ok · " + Math.round(performance.now() - t0) + " ms";
+      return;
+    }
+    throw new Error("HTTP " + r.status);
   } catch (e) {
+    if (attempt + 1 < HEALTH_MAX_ATTEMPTS) {
+      $("healthDot").className = "dot bad";
+      $("healthTxt").textContent = "waking api… retry " + (attempt + 1);
+      setTimeout(() => probeHealth(attempt + 1), HEALTH_RETRY_MS);
+      return;
+    }
     $("healthDot").className = "dot bad";
-    $("healthTxt").textContent = "api unreachable";
+    $("healthTxt").textContent = "api unreachable · " + e.message;
   }
 }
 
@@ -2355,6 +2376,9 @@ async function probeHealth() {
   sel.onchange = () => loadPreset(sel.value);
   loadPreset("SAMPLE-01");
   $("runBtn").onclick = run;
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && $("healthTxt").textContent.startsWith("api unreachable")) probeHealth();
+  });
   probeHealth();
 })();
 </script>

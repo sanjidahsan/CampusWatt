@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from guardrails import GuardrailError, validate_directives
 from interpreter import InterpreterError, call_llm
@@ -24,10 +25,22 @@ logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="GridWise LLM API")
 
+# Static assets (favicon, manifest). Judge endpoints below are unaffected.
+app.mount("/static", StaticFiles(directory=str(Path(__file__).with_name("static"))), name="static")
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon():
+    # Browsers request /favicon.ico by convention regardless of <link> tags.
+    return FileResponse(
+        Path(__file__).with_name("static").joinpath("favicon.ico"),
+        media_type="image/x-icon",
+    )
 
 
 @app.get("/", include_in_schema=False)

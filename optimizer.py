@@ -22,7 +22,7 @@ def optimize(
         if directive["directive_type"] == "solar_reduction":
             factor = directive["structured_adjustment"]["factor"]
             for h in directive["structured_adjustment"]["hours"]:
-                effective_solar[h] = hours[h].solar_kwh * factor
+                effective_solar[h] *= factor  # combine overlapping reductions conservatively
 
     # Pre-processing: per-hour constraint sets
     no_charge_hours = set()

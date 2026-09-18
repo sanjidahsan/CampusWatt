@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import List
 
@@ -13,7 +14,12 @@ from models import OptimizeRequest
 from optimizer import OptimizerError, optimize
 from replay import ReplayError, replay_validate
 
-load_dotenv()
+# override=True makes the repo's .env authoritative. Otherwise a stale/externally
+# exported GROQ_MODEL (e.g. a decommissioned model id) silently overrides the
+# model we actually intend to use and the whole service returns 500s.
+load_dotenv(override=True)
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(title="GridWise LLM API")
 
@@ -28,14 +34,16 @@ def optimize_energy(request: OptimizeRequest):
     try:
         raw_interpretations = call_llm(request.operator_notes, request.battery)
     except InterpreterError as e:
+        logger.error("LLM interpretation failed: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"error": "LLM interpretation failed", "detail": str(e)},
+            content={"error": "LLM interpretation failed"},
         )
     except Exception as e:
+        logger.error("Unexpected interpreter error: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"error": "Unexpected interpreter error", "detail": str(e)},
+            content={"error": "Unexpected interpreter error"},
         )
 
     try:
@@ -43,9 +51,10 @@ def optimize_energy(request: OptimizeRequest):
             raw_interpretations, request.operator_notes, request.battery
         )
     except GuardrailError as e:
+        logger.error("Guardrail validation failed: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"error": "Guardrail validation failed", "detail": str(e)},
+            content={"error": "Guardrail validation failed"},
         )
 
     try:
@@ -53,8 +62,9 @@ def optimize_energy(request: OptimizeRequest):
             request.hours, request.battery, validated
         )
     except OptimizerError as e:
+        logger.error("Optimization failed: %s", e)
         return JSONResponse(
-            status_code=500, content={"error": "Optimization failed", "detail": str(e)}
+            status_code=500, content={"error": "Optimization failed"}
         )
 
     try:
@@ -68,9 +78,10 @@ def optimize_energy(request: OptimizeRequest):
             peak_grid_kwh,
         )
     except ReplayError as e:
+        logger.error("Schedule validation failed: %s", e)
         return JSONResponse(
             status_code=500,
-            content={"error": "Schedule validation failed", "detail": str(e)},
+            content={"error": "Schedule validation failed"},
         )
 
     directive_interpretation = [
@@ -128,13 +139,17 @@ def build_plan_summary(validated_directives: List[dict], total_cost_bdt: float) 
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Log the full validation detail server-side only. Never echo the raw request
+    # body or internal file paths back to the client (see audit finding #4).
+    logger.error("Request validation failed: %s", exc.errors())
     return JSONResponse(
-        status_code=400, content={"error": "Invalid request", "detail": str(exc)}
+        status_code=400, content={"error": "Invalid request"}
     )
 
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception: %s", exc)
     return JSONResponse(status_code=500, content={"error": "Internal server error"})
 
 

@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from typing import List
 
 from groq import Groq
@@ -19,7 +20,7 @@ def _get_client() -> Groq:
 
 
 def _get_model() -> str:
-    return os.getenv("GROQ_MODEL", "llama3-70b-8192")
+    return os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
 
 
 SYSTEM_PROMPT = """You are an energy management system operator-note interpreter.
@@ -103,23 +104,44 @@ def build_user_prompt(notes: List[str], battery: BatteryConfig) -> str:
     )
 
 
+# Retry only provider rate limits (HTTP 429). Anything else fails fast so one
+# bad request cannot burn the 30s judge timeout. Worst case added latency
+# here is 15s, leaving room for the LP solve.
+RATE_LIMIT_RETRIES = 2
+RATE_LIMIT_BACKOFFS = (5.0, 10.0)
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    if e.__class__.__name__ == "RateLimitError":
+        return True
+    msg = str(e).lower()
+    return "429" in msg or "rate limit" in msg or "rate_limit" in msg
+
+
 def call_llm(notes: List[str], battery: BatteryConfig) -> List[dict]:
     try:
         client = _get_client()
-        response = client.chat.completions.create(
-            model=_get_model(),
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": build_user_prompt(notes, battery)},
-            ],
-            temperature=0.0,
-            max_tokens=2048,
-        )
-        raw = response.choices[0].message.content.strip()
     except InterpreterError:
         raise
-    except Exception as e:
-        raise InterpreterError(str(e))
+
+    for attempt in range(RATE_LIMIT_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=_get_model(),
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": build_user_prompt(notes, battery)},
+                ],
+                temperature=0.0,
+                max_tokens=2048,
+            )
+            raw = response.choices[0].message.content.strip()
+            break
+        except Exception as e:
+            if _is_rate_limit_error(e) and attempt < RATE_LIMIT_RETRIES:
+                time.sleep(RATE_LIMIT_BACKOFFS[attempt])
+                continue
+            raise InterpreterError(str(e))
 
     if raw.startswith("```"):
         parts = raw.split("```")

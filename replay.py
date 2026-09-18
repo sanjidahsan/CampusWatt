@@ -37,7 +37,7 @@ def replay_validate(
         adj = directive["structured_adjustment"]
         if dt == "solar_reduction":
             for h in adj["hours"]:
-                effective_solar[h] = hours_sorted[h].solar_kwh * adj["factor"]
+                effective_solar[h] *= adj["factor"]  # combine overlapping reductions conservatively
         elif dt == "no_charge_window":
             no_charge_hours.update(adj["hours"])
         elif dt == "no_discharge_window":

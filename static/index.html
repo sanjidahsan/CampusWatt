@@ -2321,6 +2321,8 @@ async function run() {
     });
     const out = await r.json();
     if (!r.ok) { showError("Optimization failed (HTTP " + r.status + "): " + (out.error || "unknown error")); return; }
+    $("healthDot").className = "dot ok";
+    $("healthTxt").textContent = "api ok · last run " + Math.round(performance.now() - t0) + " ms";
     const exp = PRESETS[key].expected;
     const marks = dirty ? null : out.directive_interpretation.map((g, i) =>
       i < exp.directives.length && dirMatch(g, exp.directives[i]));
@@ -2338,32 +2340,42 @@ async function run() {
   }
 }
 
-// A free Render instance cold-starts in ~10-60s. A single boot-time probe is a
-// lie until that finishes, so retry with backoff and report what is happening.
-const HEALTH_RETRY_MS = 3000;
-const HEALTH_MAX_ATTEMPTS = 20;   // ~60s of retries
+// Bounded retries for a legitimate Render cold start. Kept short on purpose:
+// an aggressive retry loop turns a browser-side block into console noise.
+const HEALTH_RETRY_MS = 2500;
+const HEALTH_MAX_ATTEMPTS = 3;
 
 async function probeHealth(attempt = 0) {
   const t0 = performance.now();
+  // "/health" is the primary probe. "/ping" is a cheap alias because some
+  // ad-blockers block any path containing "health" — that is a client-side
+  // block, not an API outage, so we must not report the API as down for it.
   try {
     const r = await fetch("/health", { cache: "no-store" });
     const ok = r.ok && (await r.json()).status === "ok";
-    if (ok) {
+    if (!ok) throw new Error("HTTP " + r.status);
+  } catch (primaryErr) {
+    try {
+      const r2 = await fetch("/ping", { cache: "no-store" });
+      if (!(r2.ok && (await r2.json()).ok)) throw new Error("HTTP " + r2.status);
       $("healthDot").className = "dot ok";
       $("healthTxt").textContent = "api ok · " + Math.round(performance.now() - t0) + " ms";
       return;
-    }
-    throw new Error("HTTP " + r.status);
-  } catch (e) {
-    if (attempt + 1 < HEALTH_MAX_ATTEMPTS) {
+    } catch (altErr) {
+      if (attempt + 1 < HEALTH_MAX_ATTEMPTS) {
+        $("healthDot").className = "dot bad";
+        $("healthTxt").textContent = "waking api… retry " + (attempt + 1);
+        setTimeout(() => probeHealth(attempt + 1), HEALTH_RETRY_MS);
+        return;
+      }
+      // Never let a probe failure block the console: the API may still work.
       $("healthDot").className = "dot bad";
-      $("healthTxt").textContent = "waking api… retry " + (attempt + 1);
-      setTimeout(() => probeHealth(attempt + 1), HEALTH_RETRY_MS);
+      $("healthTxt").textContent = "status unknown — run still works";
       return;
     }
-    $("healthDot").className = "dot bad";
-    $("healthTxt").textContent = "api unreachable · " + e.message;
   }
+  $("healthDot").className = "dot ok";
+  $("healthTxt").textContent = "api ok · " + Math.round(performance.now() - t0) + " ms";
 }
 
 (function init() {
@@ -2377,7 +2389,7 @@ async function probeHealth(attempt = 0) {
   loadPreset("SAMPLE-01");
   $("runBtn").onclick = run;
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && $("healthTxt").textContent.startsWith("api unreachable")) probeHealth();
+    if (!document.hidden && $("healthTxt").textContent.startsWith("status unknown")) probeHealth();
   });
   probeHealth();
 })();

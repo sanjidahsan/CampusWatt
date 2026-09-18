@@ -34,6 +34,14 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/ping", include_in_schema=False)
+def ping():
+    # Lightweight liveness alias for the console: some ad-blockers block
+    # paths containing "health", which would otherwise false-negative the
+    # browser's status probe. No work, no dependencies.
+    return {"ok": True}
+
+
 @app.get("/favicon.ico", include_in_schema=False)
 def favicon():
     # Browsers request /favicon.ico by convention regardless of <link> tags.

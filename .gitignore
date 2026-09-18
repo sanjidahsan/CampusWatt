@@ -1,6 +1,13 @@
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 *.pyo
+*.log
 venv/
 .venv/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+context/

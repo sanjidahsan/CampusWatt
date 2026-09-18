@@ -1,12 +1,13 @@
 import logging
 import os
+from pathlib import Path
 from typing import List
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from guardrails import GuardrailError, validate_directives
 from interpreter import InterpreterError, call_llm
@@ -27,6 +28,15 @@ app = FastAPI(title="GridWise LLM API")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    # Static demo console. Additive only: judge endpoints below are unchanged.
+    return FileResponse(
+        Path(__file__).with_name("static").joinpath("index.html"),
+        media_type="text/html",
+    )
 
 
 @app.post("/optimize-energy")

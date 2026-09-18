@@ -258,3 +258,18 @@ class RetryTest(unittest.TestCase):
                 interpreter.call_llm(["note"], self._batt())
         slept.assert_not_called()
         self.assertEqual(fake.chat.completions.create.call_count, 1)
+
+
+class DashboardTest(unittest.TestCase):
+    def test_root_serves_console_without_touching_api(self):
+        from fastapi.testclient import TestClient
+        from main import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        r = client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("text/html", r.headers.get("content-type", ""))
+        self.assertIn("Dispatch console", r.text)
+        # Judge endpoints intact
+        self.assertEqual(client.get("/health").json(), {"status": "ok"})
+        self.assertEqual(client.get("/nope").status_code, 404)
